@@ -15,6 +15,11 @@
 #   2. 若 /app/config.yaml 不存在 → 同上。
 #   3. 若是正常文件 → 直接启动，不干预。
 
+# Zeabur compatibility: map PORT env var to OMBRE_PORT
+if [ -n "$PORT" ] && [ -z "$OMBRE_PORT" ]; then
+    export OMBRE_PORT="$PORT"
+fi
+
 CONFIG=/app/config.yaml
 DEFAULT=/app/config.default.yaml
 
