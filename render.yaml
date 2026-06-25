@@ -9,23 +9,25 @@ services:
     envVars:
       - key: OMBRE_TRANSPORT
         value: streamable-http
+      - key: OMBRE_MCP_REQUIRE_AUTH
+        value: "false"
       - key: OMBRE_EMBED_BACKEND
         value: api
       - key: OMBRE_EMBED_API_KEY
-        sync: false          # Set in Render dashboard
+        sync: false
       - key: OMBRE_EMBED_BASE_URL
-        sync: false          # e.g. https://generativelanguage.googleapis.com/v1beta/openai/
+        value: https://generativelanguage.googleapis.com/v1beta/openai/
       - key: OMBRE_EMBED_MODEL
-        sync: false          # e.g. gemini-embedding-001
+        value: text-embedding-004
       - key: OMBRE_COMPRESS_API_KEY
-        sync: false          # Set in Render dashboard (any OpenAI-compatible key)
+        sync: false
       - key: OMBRE_COMPRESS_BASE_URL
-        sync: false          # e.g. https://generativelanguage.googleapis.com/v1beta/openai/
+        value: https://generativelanguage.googleapis.com/v1beta/openai/
       - key: OMBRE_COMPRESS_MODEL
-        sync: false          # e.g. gemini-2.5-flash
+        value: gemini-2.5-flash-lite
       - key: OMBRE_BUCKETS_DIR
         value: /opt/render/project/src/buckets
     disk:
       name: ombre-buckets
       mountPath: /opt/render/project/src/buckets
-      sizeGB: 5              # bge-m3 model ~2.2GB + buckets; free plan only has 1GB, upgrade needed
+      sizeGB: 1
