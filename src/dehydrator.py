@@ -275,10 +275,10 @@ class Dehydrator:
         # --- API availability / 是否有可用的 API ---
         self.api_available = bool(self.api_key)
 
-        # --- Initialize OpenAI-compatible client (only for openai_compat format) ---
-        # --- 初始化 OpenAI 兼容客户端（仅 openai_compat 格式使用）---
+        # --- Initialize OpenAI-compatible client (for openai_compat and unknown formats) ---
+        # --- 初始化 OpenAI 兼容客户端（openai_compat 及未知格式均使用，含 force_openai 等）---
         self.client: Optional[AsyncOpenAI] = None
-        if self.api_available and self.api_format == "openai_compat":
+        if self.api_available and self.api_format != "gemini" and self.api_format != "anthropic":
             self.client = AsyncOpenAI(
                 api_key=self.api_key,
                 base_url=self.base_url,
