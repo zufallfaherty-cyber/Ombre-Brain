@@ -46,6 +46,49 @@ def register(mcp) -> None:
             "decay_engine": "running" if sh.decay_engine.is_running else "stopped",
         })
 
+    @mcp.custom_route("/api/memory", methods=["GET"])
+    async def api_memory(request: Request) -> Response:
+        from starlette.responses import JSONResponse
+        # 公开接口（不含业务数据，仅进程内存/规模统计），便于无密码排障。
+
+        def _read_status_mb():
+            # Linux: /proc/self/status 的 VmRSS(当前) / VmHWM(峰值)，单位 kB→MB
+            try:
+                rss = hwm = None
+                with open("/proc/self/status", "r", encoding="utf-8") as f:
+                    for line in f:
+                        if line.startswith("VmRSS:"):
+                            rss = int(line.split()[1]) / 1024.0
+                        elif line.startswith("VmHWM:"):
+                            hwm = int(line.split()[1]) / 1024.0
+                return rss, hwm
+            except Exception:
+                return None, None
+
+        rss_mb, peak_mb = _read_status_mb()
+
+        emb = {}
+        try:
+            if sh.embedding_engine is not None:
+                emb = sh.embedding_engine.status()
+        except Exception:
+            pass
+
+        stats = {}
+        try:
+            stats = await sh.bucket_mgr.get_stats()
+        except Exception:
+            pass
+
+        return JSONResponse({
+            "ts": time.time(),
+            "uptime_s": int(time.time() - sh._SERVER_START_TS),
+            "rss_mb": round(rss_mb, 1) if rss_mb is not None else None,
+            "peak_mb": round(peak_mb, 1) if peak_mb is not None else None,
+            "embedding": emb,
+            "buckets": stats,
+        })
+
     @mcp.custom_route("/api/logs", methods=["GET"])
     async def api_logs(request: Request) -> Response:
         from starlette.responses import JSONResponse
