@@ -23,6 +23,7 @@ tools/breath/surface.py — 无 query 浮现模式
 ========================================
 """
 
+import math
 import random
 import time
 from datetime import datetime, timezone, timedelta
@@ -42,6 +43,43 @@ def _bucket_has_tags(meta: dict, tag_filter: list) -> bool:
         return True
     bucket_tags = set(meta.get("tags", []) or [])
     return all(t in bucket_tags for t in tag_filter)
+
+
+_DEFAULT_DOMAIN_DIVERSITY_RATIO = 0.5  # 单一主域在浮现名额里最多占 50%
+
+
+def _primary_domain(b: dict) -> str:
+    """取 bucket 的主域 domain[0]，空/缺失 → 「未分类」。"""
+    d = (b.get("metadata", {}) or {}).get("domain") or []
+    if isinstance(d, list) and d:
+        return str(d[0]).strip() or "未分类"
+    return "未分类"
+
+
+def _diversify_domains(buckets: list, ratio: float) -> list:
+    """交错重排，使任意前缀里单一主域占比不超过 ratio（默认 50%）。
+
+    高分域（恋爱/亲密）不再霸占前 N 名，日常、哲学等主题也轮流浮上来。
+    贪心：按原顺序（已按分数排序）遍历，某域已达当前前缀配额则后移，
+    最后把被后移的按原分数序补到末尾，保证不丢桶。ratio=0 或 1 等价于不重排。
+    """
+    if len(buckets) <= 1:
+        return buckets
+    ratio = max(0.0, min(1.0, float(ratio)))
+    result: list = []
+    counts: dict = {}
+    deferred: list = []
+    for b in buckets:
+        dom = _primary_domain(b)
+        cur = counts.get(dom, 0)
+        limit = math.ceil((len(result) + 1) * ratio)
+        if cur + 1 <= limit:
+            result.append(b)
+            counts[dom] = cur + 1
+        else:
+            deferred.append(b)
+    result.extend(deferred)
+    return result
 
 
 async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -> str:
@@ -185,6 +223,15 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
             non_cold = top1 + pool + non_cold[min(20, len(non_cold)):]
         candidates = cold_start + non_cold
     candidates = candidates[:max_results]
+
+    # --- Domain diversity: 单一主域最多占一半名额，冷启动桶仍置顶 ---
+    try:
+        diversity_ratio = float(surfacing_cfg.get("domain_diversity_ratio", _DEFAULT_DOMAIN_DIVERSITY_RATIO))
+    except (TypeError, ValueError):
+        diversity_ratio = _DEFAULT_DOMAIN_DIVERSITY_RATIO
+    n_cold = len(cold_start)
+    if len(candidates) > n_cold + 1:
+        candidates = candidates[:n_cold] + _diversify_domains(candidates[n_cold:], diversity_ratio)
 
     dynamic_results = []
     for b in candidates:

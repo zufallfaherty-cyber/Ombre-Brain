@@ -61,7 +61,7 @@ _FRESHNESS_AMPLITUDE = 1.0       # bonus 上限增量（0 → 无加成；1 → 
 # 长期：超过这个分界后 emotion 占主导（"刻骨铭心 vs 已经无所谓"）
 _SHORT_TERM_DAYS = 3.0
 _SHORT_TERM_TIME_RATIO = 0.7
-_LONG_TERM_EMOTION_RATIO = 0.7
+_LONG_TERM_EMOTION_RATIO = 0.6
 
 # --- Activation count 的次线性放大：访问越多越鲜活，但不线性 ---
 _ACTIVATION_EXPONENT = 0.3
@@ -223,7 +223,7 @@ class DecayEngine:
 
         # --- Short-term vs Long-term weight separation ---
         # 短期（≤3天）：time_weight 占 70%，emotion 占 30%
-        # 长期（>3天）：emotion 占 70%，time_weight 占 30%
+        # 长期（>3天）：emotion 占 60%，time_weight 占 40%
         if days_since <= _SHORT_TERM_DAYS:
             # Short-term: time dominates, emotion amplifies
             combined_weight = (
