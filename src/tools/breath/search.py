@@ -118,27 +118,22 @@ async def surface_search(
             )
             continue
 
-    # --- 检索结果 < 3 时 40% 概率随机浮现 ---
-    if len(matches) < 3 and random.random() < 0.4:
+    # --- 检索结果不足 3 条时，用当下浮现补齐 ---
+    # 口语长句常常只命中 1 条，只给一条会让调用方觉得"记忆几乎是空的"。
+    # 这里确定性地补一批浮现（不再是 40% 概率撞运气）。
+    if len(results) < 3:
         try:
-            all_buckets = await rt.bucket_mgr.list_all(include_archive=False)
-            matched_ids = {b["id"] for b in matches}
-            low_weight = [
-                b for b in all_buckets
-                if b["id"] not in matched_ids
-                and b["metadata"].get("type") not in ("feel", "plan", "letter")
-                and rt.decay_engine.calculate_score(b["metadata"]) < 2.0
-            ]
-            if low_weight:
-                drifted = random.sample(low_weight, min(random.randint(1, 3), len(low_weight)))
-                drift_results = []
-                for b in drifted:
-                    clean_meta = {k: v for k, v in b["metadata"].items() if k != "tags"}
-                    summary = await rt.dehydrator.dehydrate(strip_wikilinks(b["content"]), clean_meta)
-                    drift_results.append(f"[surface_type: random]\n{summary}")
-                results.append("--- 忽然想起来 ---\n" + "\n---\n".join(drift_results))
+            fill = await surface_default(
+                max_results=5,
+                max_tokens=min(max_tokens, 3000),
+                tag_filter=tag_filter,
+            )
+            if fill and not fill.startswith("我的记忆池现在是空的"):
+                fill = fill.replace("=== 浮现记忆 ===\n", "", 1)
+                header = "--- 此刻也浮现 ---\n" if results else "（没有直接相关的记忆，下面是此刻自然浮现的）\n"
+                results.append(header + fill)
         except Exception as e:
-            rt.logger.warning(f"Random surfacing failed / 随机浮现失败: {e}")
+            rt.logger.warning(f"Surface fill failed / 浮现补齐失败: {e}")
 
     if not results:
         # 完全没匹配到：退一步给当下自然浮现的记忆，别让调用方的记忆区整个空掉。
