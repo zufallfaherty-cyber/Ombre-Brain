@@ -27,6 +27,7 @@ import random
 
 from .. import _runtime as rt
 from utils import strip_wikilinks, count_tokens_approx, bucket_time_label
+from .surface import surface_default
 
 
 def _bucket_has_tags(meta: dict, tag_filter: list) -> bool:
@@ -140,6 +141,19 @@ async def surface_search(
             rt.logger.warning(f"Random surfacing failed / 随机浮现失败: {e}")
 
     if not results:
+        # 完全没匹配到：退一步给当下自然浮现的记忆，别让调用方的记忆区整个空掉。
+        # （口语化的长句常常一个关键词都对不上，但此时「我还有记忆」本身才是重点）
+        try:
+            fallback = await surface_default(
+                max_results=3,
+                max_tokens=min(max_tokens, 1500),
+                tag_filter=tag_filter,
+            )
+            if fallback and not fallback.startswith("我的记忆池现在是空的"):
+                return "（没有直接相关的记忆，下面是此刻自然浮现的）\n" + fallback
+        except Exception as e:
+            rt.logger.warning(f"surface fallback failed: {e}")
+
         if rt.fire_webhook:
             await rt.fire_webhook("breath", {"mode": "empty", "matches": 0})
         return (
