@@ -26,7 +26,7 @@ embedding_engine 向量近邻，结果合并去重，逐条 dehydrate 后塞 tok
 import random
 
 from .. import _runtime as rt
-from utils import strip_wikilinks, count_tokens_approx
+from utils import strip_wikilinks, count_tokens_approx, bucket_time_label
 
 
 def _bucket_has_tags(meta: dict, tag_filter: list) -> bool:
@@ -101,12 +101,13 @@ async def surface_search(
                 break
             await rt.bucket_mgr.touch(bucket["id"])
             meta_b = bucket["metadata"]
+            day = bucket_time_label(meta_b)
             if meta_b.get("pinned") or meta_b.get("protected") or meta_b.get("type") == "permanent":
-                summary = f"📌 [核心准则] [bucket_id:{bucket['id']}] {summary}"
+                summary = f"📌 [核心准则] [{day}] [bucket_id:{bucket['id']}] {summary}"
             elif bucket.get("vector_match"):
-                summary = f"[语义关联] [bucket_id:{bucket['id']}] {summary}"
+                summary = f"[语义关联] [{day}] [bucket_id:{bucket['id']}] {summary}"
             else:
-                summary = f"[bucket_id:{bucket['id']}] {summary}"
+                summary = f"[{day}] [bucket_id:{bucket['id']}] {summary}"
             results.append(summary)
             token_used += summary_tokens
         except Exception as e:

@@ -21,7 +21,7 @@ tools/breath/importance.py — importance_min 模式
 """
 
 from .. import _runtime as rt
-from utils import strip_wikilinks, count_tokens_approx
+from utils import strip_wikilinks, count_tokens_approx, bucket_time_label
 
 
 def _bucket_has_tags(meta: dict, tag_filter: list) -> bool:
@@ -68,7 +68,7 @@ async def surface_by_importance(importance_min: int, max_tokens: int, tag_filter
             if token_used + t > max_tokens:
                 break
             imp = b["metadata"].get("importance", 0)
-            results.append(f"[importance:{imp}] [bucket_id:{b['id']}] {summary}")
+            results.append(f"[importance:{imp}] [{bucket_time_label(b['metadata'])}] [bucket_id:{b['id']}] {summary}")
             token_used += t
         except Exception as e:
             rt.logger.warning(f"importance_min bucket processing failed: {e}")

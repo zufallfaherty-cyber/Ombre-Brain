@@ -21,7 +21,7 @@ tools/breath/feel.py — feel 通道
 """
 
 from .. import _runtime as rt
-from utils import strip_wikilinks, count_tokens_approx
+from utils import strip_wikilinks, count_tokens_approx, bucket_time_label
 
 
 async def surface_feels(max_tokens: int) -> str:
@@ -35,7 +35,7 @@ async def surface_feels(max_tokens: int) -> str:
         collapsed_lines: list[str] = []
         used = 0
         for f in feels:
-            created = f["metadata"].get("created", "")
+            created = bucket_time_label(f["metadata"]) or f["metadata"].get("created", "")
             full_text = strip_wikilinks(f["content"])
             full_entry = f"[{created}] [bucket_id:{f['id']}]\n{full_text}"
             cost = count_tokens_approx(full_entry)
@@ -45,7 +45,7 @@ async def surface_feels(max_tokens: int) -> str:
             else:
                 snippet = full_text.replace("\n", " ").strip()[:60]
                 collapsed_lines.append(
-                    f"[{created[:10]}] [bucket_id:{f['id']}] {snippet}…"
+                    f"[{created}] [bucket_id:{f['id']}] {snippet}…"
                 )
         out = "=== 你留下的 feel（新→旧）===\n" + "\n---\n".join(full_lines)
         if collapsed_lines:
