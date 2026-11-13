@@ -80,7 +80,7 @@ _DEFAULT_VALENCE = 0.5  # 0=极负, 1=极正
 _DEFAULT_AROUSAL = 0.3  # 0=完全平静, 1=极激动
 
 # --- 输出截断长度 ---
-_TAGS_MAX = 15           # tags 最多保留几个
+_TAGS_MAX = 6            # tags 最多保留几个（3~5 核心词，多余截断）
 _DOMAIN_MAX = 3          # domain 最多保留几个（rule.md 推荐选 1~2 个）
 _NAME_MAX_CHARS = 20     # suggested_name 上限
 _PLAN_REASON_MAX = 200   # plan 判定 reason 上限
@@ -162,7 +162,9 @@ DIGEST_PROMPT = """你是一个日记整理专家。她/他会发送一段包含
   }
 ]
 
-tags 生成规则：先从原文精准提取 3~5 个核心词，再引申扩展 5~8 个语义相关词（近义词、上位词、关联场景词），合并为一个数组。
+tags 生成规则：只从原文精准提取 3~5 个核心词（具体的东西、地点、事件、偏好）。
+不要写「恋爱」「情侣」「日常」「亲密关系」「撒娇」这类泛化类别词（domain 已经表达了），
+也不要写称呼和近义词。宁可少写，也不要凑数。
 
 主题域可选（选最精确的 1~2 个，只选真正相关的）：
   日常: ["饮食", "穿搭", "出行", "居家", "购物"]
@@ -209,12 +211,17 @@ ANALYZE_PROMPT = """你是一个内容分析器。请分析以下文本，输出
    内心: ["情绪", "回忆", "梦境", "自省"]
 2. valence（情感效价）：0.0~1.0，0=极度消极 → 0.5=中性 → 1.0=极度积极
 3. arousal（情感唤醒度）：0.0~1.0，0=非常平静 → 0.5=普通 → 1.0=非常激动
-4. tags（关键词标签）：分两步生成，合并为一个数组：
-   第一步—精准提取：从原文抽取 3~5 个真正的核心词，不泛化、不遗漏
-   第二步—引申扩展：自动补充 8~10 个与当前场景语义相关的词，包括近义词、上位词、关联场景词、她/他可能用不同措辞搜索的词
-   两步合并为一个 tags 数组，总计 10~15 个
-5. suggested_name（建议桶名）：10字以内的简短标题
-6. 在 tags 和 suggested_name 中不要使用 [[]] 双链标记
+4. tags（关键词标签）：只从原文精准提取 3~5 个核心词，不泛化、不引申近义词。
+   不要写「恋爱」「情侣」「日常」「亲密」「亲密关系」「撒娇」「暧昧」这类泛化类别词
+   （domain 已经表达了，写了等于没写），也不要写称呼（哥哥/宝宝）和凑数的上位词。
+5. importance（重要度，1~10 的整数）：这条记忆以后有多值得被想起
+   - 1~3：一次性的寒暄、确认、无关紧要的琐事（"在吗""嗯""外卖到了"）
+   - 4~6：普通日常，默认 **5**（吃了什么、看了什么、普通打闹）
+   - 7~8：她的明确喜好/习惯/关系进展/反复出现的生活主题（爱吃什么、怕什么、最近在备考、固定作息）
+   - 9~10：长期个人信息（生日/家人/职业/学校/健康/底线/亲密偏好）或重要承诺
+   拿不准就用 5；**不要轻易给 8 以上**，9~10 只留给真正长期有效的个人信息与承诺。
+6. suggested_name（建议桶名）：10字以内的简短标题
+7. 在 tags 和 suggested_name 中不要使用 [[]] 双链标记
 
 输出格式（纯 JSON，无其他内容）：
 {
@@ -222,6 +229,7 @@ ANALYZE_PROMPT = """你是一个内容分析器。请分析以下文本，输出
   "valence": 0.7,
   "arousal": 0.4,
   "tags": ["核心词1", "核心词2", "扩展词1", "扩展词2", "..."],
+  "importance": 5,
   "suggested_name": "简短标题"
 }"""
 
@@ -614,6 +622,9 @@ class Dehydrator:
         header = ""
         if metadata and isinstance(metadata, dict):
             name = metadata.get("name", "未命名")
+            # 桶名通常带 `2026-11-01 13-00-13 ` 前缀（UTC），外层浮现结果已经给了
+            # 北京时间的日期标签，这里去掉，避免同一句话出现两个时间。
+            name = re.sub(r"^\d{4}-\d{2}-\d{2}\s+\d{2}-\d{2}-\d{2}\s+", "", str(name)).strip() or "未命名"
             domains = ", ".join(metadata.get("domain", []))
             valence, arousal = self._clamp_va(metadata)
             header = f"📌 记忆桶: {name}"
@@ -631,16 +642,44 @@ class Dehydrator:
                 header += " [已消化]"
             header += "\n"
 
-        # 去掉 keywords 字段：LLM 返回的 JSON 里 keywords 是内部索引用途，不暴露给上下文
+        # 脱水结果是 JSON（summary/core_facts/emotion_state/todos），
+        # 直接塞给上下文或前端会显示成一坨 {"core_facts": [...]}。
+        # 这里统一渲染成自然语言；非 JSON / 不认识的 JSON 结构原样透传。
         try:
             parsed = json.loads(content)
-            if isinstance(parsed, dict) and "keywords" in parsed:
-                parsed.pop("keywords", None)
-                content = json.dumps(parsed, ensure_ascii=False)
+            if isinstance(parsed, dict):
+                content = self._render_dehydrated(parsed)
         except Exception:
             pass  # 非 JSON 内容直接透传
         content = re.sub(r'\[\[([^\]]+)\]\]', r'\1', content)
         return f"{header}{content}"
+
+    @staticmethod
+    def _render_dehydrated(d: dict) -> str:
+        """把脱水 JSON 渲染成人类/AI 都易读的纯文本。"""
+        parts = []
+        summary = str(d.get("summary") or "").strip()
+        if summary:
+            parts.append(summary)
+        facts = d.get("core_facts") or []
+        if isinstance(facts, list):
+            for f in facts:
+                f = str(f).strip()
+                if f:
+                    parts.append(f"- {f}")
+        todos = d.get("todos") or []
+        if isinstance(todos, list):
+            todo_text = "；".join(str(t).strip() for t in todos if str(t).strip())
+            if todo_text:
+                parts.append(f"待办：{todo_text}")
+        emotion = str(d.get("emotion_state") or "").strip()
+        if emotion:
+            parts.append(f"（情绪：{emotion}）")
+        if not parts:
+            # 结构不认识：去掉 keywords 后原样返回，避免丢内容
+            d = {k: v for k, v in d.items() if k != "keywords"}
+            return json.dumps(d, ensure_ascii=False)
+        return "\n".join(parts)
 
     # ---------------------------------------------------------
     # Auto-tagging: analyze content for domain + emotion + tags
@@ -712,11 +751,19 @@ class Dehydrator:
         # --- Validate and clamp value ranges / 校验并钳制数值范围 ---
         valence, arousal = self._clamp_va(result)
 
+        # importance：模型给 1~10，越界/缺失回退 5（普通日常）
+        try:
+            importance = int(result.get("importance", _DEFAULT_IMPORTANCE))
+        except (TypeError, ValueError):
+            importance = _DEFAULT_IMPORTANCE
+        importance = max(1, min(10, importance))
+
         return {
             "domain": result.get("domain", ["未分类"])[:_DOMAIN_MAX],
             "valence": valence,
             "arousal": arousal,
             "tags": result.get("tags", [])[:_TAGS_MAX],
+            "importance": importance,
             "suggested_name": str(result.get("suggested_name", ""))[:_NAME_MAX_CHARS],
         }
 
@@ -734,6 +781,7 @@ class Dehydrator:
             "valence": _DEFAULT_VALENCE,
             "arousal": _DEFAULT_AROUSAL,
             "tags": [],
+            "importance": _DEFAULT_IMPORTANCE,
             "suggested_name": "",
         }
 
